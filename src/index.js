@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { send, receive } from './utils/network.js';
 import fsSync from 'node:fs';
+import { WebSocketServer } from 'ws';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -78,6 +79,16 @@ app.post('/data', upload.single('file'), async (req, res) => {
   res.download('key/My_Key.pem');
 });
 
+// WebSocket server for real-time notifications
+const wss = new WebSocketServer({ noServer: true });
+let wsClients = [];
+wss.on('connection', (ws) => {
+  wsClients.push(ws);
+  ws.on('close', () => {
+    wsClients = wsClients.filter(c => c !== ws);
+  });
+});
+
 app.post('/download_data', upload.single('file'), async (req, res) => {
   const metaArr = unwrap(await fs.readFile(req.file.path));
   const chunks = metaArr.length;
@@ -92,6 +103,10 @@ app.post('/download_data', upload.single('file'), async (req, res) => {
   const outputName = (metaArr[0].originalName || 'output.bin') + '.network';
   const output = path.join('restored', outputName);
   await merge(chunks, output);
+  // Notify all WebSocket clients
+  wsClients.forEach(ws => {
+    if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'received', file: outputName }));
+  });
   res.download(output, outputName);
 });
 
@@ -112,4 +127,13 @@ app.get('/download_received', async (req, res) => {
   res.download(filePath);
 });
 
-app.listen(8000, () => console.log('Secure‑Store listening on :8000'));
+const server = app.listen(8000, () => console.log('Secure‑Store listening on :8000'));
+server.on('upgrade', (req, socket, head) => {
+  if (req.url === '/ws') {
+    wss.handleUpgrade(req, socket, head, ws => {
+      wss.emit('connection', ws, req);
+    });
+  } else {
+    socket.destroy();
+  }
+});

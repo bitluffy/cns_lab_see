@@ -37,13 +37,16 @@ export async function send(fileDir, bundlePath, host, port = 4000) {
 
 export function receive(saveDir, bundleDest, port = 4000) {
   const server = createServer(sock => {
+    console.log(`[RECEIVER] Connection received from`, sock.remoteAddress, ':', sock.remotePort);
     let expecting = 'bundle', left = 0, meta = [];
     const bufQ = [];
     sock.on('data', async data => {
+      console.log(`[RECEIVER] Data received:`, data.length, 'bytes');
       bufQ.push(data);
       while (bufQ.length) {
         if (left === 0) {
           left = parseInt(bufQ.shift().toString('hex'), 16);
+          console.log(`[RECEIVER] Expecting next chunk of size`, left);
           continue;
         }
         const chunk = bufQ.shift();
@@ -54,10 +57,13 @@ export function receive(saveDir, bundleDest, port = 4000) {
         const piece = chunk.subarray(0, left);
         if (expecting === 'bundle') {
           await fs.writeFile(bundleDest, piece);
+          console.log(`[RECEIVER] Bundle written to`, bundleDest);
           expecting = 'file';
         } else {
           const idx = meta.length;
-          await fs.writeFile(`${saveDir}/SECRET${String(idx).padStart(7, '0')}`, piece);
+          const filePath = `${saveDir}/SECRET${String(idx).padStart(7, '0')}`;
+          await fs.writeFile(filePath, piece);
+          console.log(`[RECEIVER] File part written to`, filePath);
           meta.push(true);
         }
         left = 0;
@@ -65,6 +71,12 @@ export function receive(saveDir, bundleDest, port = 4000) {
         if (chunk.length > piece.length) bufQ.unshift(chunk.subarray(piece.length));
       }
     });
+    sock.on('end', () => {
+      console.log('[RECEIVER] Connection ended');
+    });
+    sock.on('error', (err) => {
+      console.error('[RECEIVER] Socket error:', err.message);
+    });
   });
-  server.listen(port, () => console.log(`Waiting on ${port}…`));
+  server.listen(port, () => console.log(`[RECEIVER] Waiting on port ${port}…`));
 }
