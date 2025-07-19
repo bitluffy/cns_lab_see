@@ -163,7 +163,7 @@ app.get('/received_files', async (req, res) => {
 
 app.get('/download_received', async (req, res) => {
   const { file } = req.query;
-  if (!file || file.includes('..') || file.includes('/') || !file.endsWith('.network')) return res.status(400).send('Invalid file');
+  if (!file || file.includes('..') || file.includes('/')) return res.status(400).send('Invalid file');
   const filePath = path.join('restored', file);
   if (!fsSync.existsSync(filePath)) return res.status(404).send('File not found');
   res.download(filePath);
