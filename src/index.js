@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import { send, receive } from './utils/network.js';
 import fsSync from 'node:fs';
 import { WebSocketServer } from 'ws';
+import net from 'net';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -29,7 +30,7 @@ app.post('/d2d_send', upload.single('file'), async (req, res) => {
   const { ip, port } = req.body;
   if (!ip || !port || !req.file) return res.status(400).send('Missing IP, port, or file');
   // Send the raw file to the target device
-  const sock = require('net').createConnection({ host: ip, port: parseInt(port) }, async () => {
+  const sock = net.createConnection({ host: ip, port: parseInt(port) }, async () => {
     // Send filename length and filename first
     const filename = req.file.originalname;
     const nameBuf = Buffer.from(filename, 'utf8');
@@ -50,7 +51,7 @@ app.post('/d2d_send', upload.single('file'), async (req, res) => {
 // In /d2d_receive, save the received file directly
 app.post('/d2d_receive', async (req, res) => {
   if (receiverServer) return res.status(400).send('Receiver already running');
-  receiverServer = require('net').createServer(sock => {
+  receiverServer = net.createServer(sock => {
     let state = 'filename', nameLen = 0, filename = '', fileLen = 0, fileBuf = Buffer.alloc(0);
     let buf = Buffer.alloc(0);
     sock.on('data', async data => {

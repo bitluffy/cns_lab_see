@@ -188,18 +188,22 @@
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === 'received' && msg.file) {
-              // Show notification
-              const list = document.getElementById('receivedFilesList');
-              const li = document.createElement('li');
-              li.innerHTML = `<b>New file received:</b> <a href="/download_received?file=${encodeURIComponent(msg.file)}" download>${msg.file}</a>`;
-              list.prepend(li);
-              // Auto-download
+              // Always auto-download
               const a = document.createElement('a');
               a.href = `/download_received?file=${encodeURIComponent(msg.file)}`;
               a.download = msg.file;
               document.body.appendChild(a);
               a.click();
               a.remove();
+              // Show notification in the list
+              const list = document.getElementById('receivedFilesList');
+              if (list) {
+                const li = document.createElement('li');
+                li.innerHTML = `<b>New file received:</b> <a href="/download_received?file=${encodeURIComponent(msg.file)}" download>${msg.file}</a>`;
+                list.prepend(li);
+              }
+              // Refresh the received files list
+              if (typeof loadReceivedFiles === 'function') loadReceivedFiles();
             }
           } catch (e) {}
         };
