@@ -29,37 +29,43 @@ let receiverServer = null;
 app.post('/d2d_send', upload.single('file'), async (req, res) => {
   const { ip, port } = req.body;
   if (!ip || !port || !req.file) return res.status(400).send('Missing IP, port, or file');
-  // Send the raw file to the target device
   const sock = net.createConnection({ host: ip, port: parseInt(port) }, async () => {
-    // Send filename length and filename first
-    const filename = req.file.originalname;
-    const nameBuf = Buffer.from(filename, 'utf8');
-    sock.write(Buffer.alloc(4, nameBuf.length.toString(16).padStart(8, '0'), 'hex'));
-    sock.write(nameBuf);
-    // Send file size and file data
-    const fileBuf = await fs.readFile(req.file.path);
-    sock.write(Buffer.alloc(8, fileBuf.length.toString(16).padStart(16, '0'), 'hex'));
-    sock.write(fileBuf);
-    sock.end();
-    res.status(200).send('File sent');
+    try {
+      const filename = req.file.originalname;
+      const nameBuf = Buffer.from(filename, 'utf8');
+      const fileBuf = await fs.readFile(req.file.path);
+      // Send filename length (4 bytes, BE int)
+      const nameLenBuf = Buffer.alloc(4);
+      nameLenBuf.writeUInt32BE(nameBuf.length, 0);
+      sock.write(nameLenBuf);
+      sock.write(nameBuf);
+      // Send file length (8 bytes, BE BigInt)
+      const fileLenBuf = Buffer.alloc(8);
+      fileLenBuf.writeBigUInt64BE(BigInt(fileBuf.length), 0);
+      sock.write(fileLenBuf);
+      sock.write(fileBuf);
+      sock.end();
+      res.status(200).send('File sent');
+    } catch (err) {
+      res.status(500).send('Send error: ' + err.message);
+    }
   });
   sock.on('error', (err) => {
     res.status(500).send('Send error: ' + err.message);
   });
 });
 
-// In /d2d_receive, save the received file directly
 app.post('/d2d_receive', async (req, res) => {
   if (receiverServer) return res.status(400).send('Receiver already running');
   receiverServer = net.createServer(sock => {
-    let state = 'filename', nameLen = 0, filename = '', fileLen = 0, fileBuf = Buffer.alloc(0);
+    let state = 'filename', nameLen = 0, filename = '', fileLen = 0n, fileBuf = Buffer.alloc(0);
     let buf = Buffer.alloc(0);
     sock.on('data', async data => {
       buf = Buffer.concat([buf, data]);
       while (true) {
         if (state === 'filename') {
           if (buf.length < 4) break;
-          nameLen = parseInt(buf.subarray(0, 4).toString('hex'), 16);
+          nameLen = buf.readUInt32BE(0);
           buf = buf.subarray(4);
           state = 'filename_data';
         } else if (state === 'filename_data') {
@@ -69,17 +75,16 @@ app.post('/d2d_receive', async (req, res) => {
           state = 'filelen';
         } else if (state === 'filelen') {
           if (buf.length < 8) break;
-          fileLen = parseInt(buf.subarray(0, 8).toString('hex'), 16);
+          fileLen = buf.readBigUInt64BE(0);
           buf = buf.subarray(8);
           state = 'filedata';
         } else if (state === 'filedata') {
-          if (buf.length < fileLen) break;
-          fileBuf = buf.subarray(0, fileLen);
-          buf = buf.subarray(fileLen);
-          // Save file
+          if (buf.length < Number(fileLen)) break;
+          fileBuf = buf.subarray(0, Number(fileLen));
+          buf = buf.subarray(Number(fileLen));
+          // Save file as binary
           const savePath = path.join('restored', filename);
           await fs.writeFile(savePath, fileBuf);
-          // Notify WebSocket clients
           wsClients.forEach(ws => {
             if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'received', file: filename }));
           });
