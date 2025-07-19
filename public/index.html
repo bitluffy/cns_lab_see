@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Secure Store</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 500px; margin: 40px auto; background: #fff; padding: 2em 2.5em; border-radius: 10px; box-shadow: 0 2px 8px #0001; }
+    h1 { text-align: center; }
+    form { margin-bottom: 2em; }
+    label { display: block; margin-bottom: 0.5em; font-weight: bold; }
+    input[type="file"] { margin-bottom: 1em; }
+    button { background: #007bff; color: #fff; border: none; padding: 0.7em 1.5em; border-radius: 5px; cursor: pointer; font-size: 1em; }
+    button:hover { background: #0056b3; }
+    .result { margin-top: 1em; color: green; }
+    .error { margin-top: 1em; color: red; }
+    .section { margin-bottom: 2em; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Secure Store</h1>
+    <div class="section">
+      <h2>Encrypt & Split File</h2>
+      <form id="uploadForm" enctype="multipart/form-data">
+        <label for="file">Select file to encrypt:</label>
+        <input type="file" id="file" name="file" required />
+        <button type="submit">Encrypt & Download Key</button>
+      </form>
+      <div id="uploadResult" class="result"></div>
+      <div id="uploadError" class="error"></div>
+    </div>
+    <div class="section">
+      <h2>Restore File</h2>
+      <form id="restoreForm" enctype="multipart/form-data">
+        <label for="pem">Select PEM Key to restore:</label>
+        <input type="file" id="pem" name="file" accept=".pem" required />
+        <button type="submit">Restore & Download File</button>
+      </form>
+      <div id="restoreResult" class="result"></div>
+      <div id="restoreError" class="error"></div>
+    </div>
+    <div class="section">
+      <h2>Device-to-Device Transfer</h2>
+      <form id="d2dSendForm" enctype="multipart/form-data">
+        <label for="d2dIp">Target Device IP:</label>
+        <input type="text" id="d2dIp" name="ip" placeholder="e.g. 192.168.1.42" required />
+        <label for="d2dPort">Port:</label>
+        <input type="number" id="d2dPort" name="port" value="4000" required />
+        <label for="d2dFile">Select file to send:</label>
+        <input type="file" id="d2dFile" name="file" required />
+        <button type="submit">Send to Device</button>
+      </form>
+      <div id="d2dSendResult" class="result"></div>
+      <div id="d2dSendError" class="error"></div>
+      <hr/>
+      <button id="d2dReceiveBtn">Start Receiving</button>
+      <div id="d2dReceiveResult" class="result"></div>
+      <div id="d2dReceiveError" class="error"></div>
+    </div>
+  </div>
+  <script>
+    // Encrypt & Split
+    document.getElementById('uploadForm').onsubmit = async function(e) {
+      e.preventDefault();
+      const form = e.target;
+      const data = new FormData(form);
+      document.getElementById('uploadResult').textContent = '';
+      document.getElementById('uploadError').textContent = '';
+      try {
+        const res = await fetch('/data', { method: 'POST', body: data });
+        if (!res.ok) throw new Error('Failed to upload file');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'My_Key.pem';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        document.getElementById('uploadResult').textContent = 'Key downloaded! Keep it safe.';
+      } catch (err) {
+        document.getElementById('uploadError').textContent = err.message;
+      }
+    };
+    // Restore
+    document.getElementById('restoreForm').onsubmit = async function(e) {
+      e.preventDefault();
+      const form = e.target;
+      const data = new FormData(form);
+      document.getElementById('restoreResult').textContent = '';
+      document.getElementById('restoreError').textContent = '';
+      try {
+        const res = await fetch('/download_data', { method: 'POST', body: data });
+        if (!res.ok) throw new Error('Failed to restore file');
+        const disposition = res.headers.get('Content-Disposition');
+        let filename = 'output.bin';
+        if (disposition && disposition.includes('filename=')) {
+          filename = disposition.split('filename=')[1].replace(/"/g, '');
+        }
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        document.getElementById('restoreResult').textContent = 'File restored and downloaded!';
+      } catch (err) {
+        document.getElementById('restoreError').textContent = err.message;
+      }
+    };
+    // Device-to-Device Send
+    document.getElementById('d2dSendForm').onsubmit = async function(e) {
+      e.preventDefault();
+      const ip = document.getElementById('d2dIp').value;
+      const port = document.getElementById('d2dPort').value;
+      const fileInput = document.getElementById('d2dFile');
+      const data = new FormData();
+      data.append('file', fileInput.files[0]);
+      data.append('ip', ip);
+      data.append('port', port);
+      document.getElementById('d2dSendResult').textContent = '';
+      document.getElementById('d2dSendError').textContent = '';
+      try {
+        const res = await fetch('/d2d_send', { method: 'POST', body: data });
+        if (!res.ok) throw new Error('Failed to send file');
+        document.getElementById('d2dSendResult').textContent = 'File sent to device!';
+      } catch (err) {
+        document.getElementById('d2dSendError').textContent = err.message;
+      }
+    };
+    // Device-to-Device Receive
+    document.getElementById('d2dReceiveBtn').onclick = async function() {
+      document.getElementById('d2dReceiveResult').textContent = '';
+      document.getElementById('d2dReceiveError').textContent = '';
+      try {
+        const res = await fetch('/d2d_receive', { method: 'POST' });
+        if (!res.ok) throw new Error('Failed to start receiver');
+        document.getElementById('d2dReceiveResult').textContent = 'Receiver started! Waiting for files...';
+      } catch (err) {
+        document.getElementById('d2dReceiveError').textContent = err.message;
+      }
+    };
+  </script>
+</body>
+</html> 

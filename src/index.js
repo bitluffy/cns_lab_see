@@ -1,0 +1,97 @@
+import express from 'express';
+import multer from 'multer';
+import { split, merge } from './utils/divider.js';
+import { encryptChunk, decryptChunk } from './utils/crypto-suite.js';
+import { wrap, unwrap } from './utils/key-bundle.js';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'url';
+import { send, receive } from './utils/network.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const app = express();
+const upload = multer({ dest: 'uploads/' });
+
+// Serve static frontend
+const publicDir = path.resolve(__dirname, '../public');
+app.use(express.static(publicDir));
+
+// Fallback: always serve index.html for root
+app.get('/', (req, res) => {
+  res.sendFile(path.join(publicDir, 'index.html'));
+});
+
+let receiverServer = null;
+
+app.post('/d2d_send', upload.single('file'), async (req, res) => {
+  const { ip, port } = req.body;
+  if (!ip || !port || !req.file) return res.status(400).send('Missing IP, port, or file');
+  // Encrypt and split as usual
+  const pieces = await split(req.file.path);
+  const meta = [];
+  await fs.mkdir('encrypted', { recursive: true });
+  await fs.mkdir('key', { recursive: true });
+  for (let i = 0; i < pieces; i++) {
+    const part = await fs.readFile(`files/SECRET${String(i).padStart(7, '0')}`);
+    const info = encryptChunk((i % 3) + 1, part);
+    meta.push({ algo: info.algo, key: info.key, nonce: info.nonce });
+    await fs.writeFile(`encrypted/SECRET${String(i).padStart(7, '0')}`, info.cipher);
+  }
+  if (meta.length > 0 && req.file && req.file.originalname) {
+    meta[0].originalName = req.file.originalname;
+  }
+  const { pem } = wrap(meta);
+  await fs.writeFile('key/My_Key.pem', pem);
+  // Send encrypted files and key to target device
+  await send('encrypted', 'key/My_Key.pem', ip, parseInt(port));
+  res.status(200).send('File sent');
+});
+
+app.post('/d2d_receive', async (req, res) => {
+  if (receiverServer) return res.status(400).send('Receiver already running');
+  // Start receiver server
+  receiverServer = receive('encrypted', 'key/My_Key.pem', 4000);
+  res.status(200).send('Receiver started');
+});
+
+app.post('/data', upload.single('file'), async (req, res) => {
+  const pieces = await split(req.file.path);
+  const meta = [];
+
+  await fs.mkdir('encrypted', { recursive: true });
+  await fs.mkdir('key', { recursive: true });
+
+  for (let i = 0; i < pieces; i++) {
+    const part = await fs.readFile(`files/SECRET${String(i).padStart(7, '0')}`);
+    const info = encryptChunk((i % 3) + 1, part); // Only use algos 1, 2, 3
+    meta.push({ algo: info.algo, key: info.key, nonce: info.nonce });
+    await fs.writeFile(`encrypted/SECRET${String(i).padStart(7, '0')}`, info.cipher);
+  }
+
+  // Store original filename in the first meta entry
+  if (meta.length > 0 && req.file && req.file.originalname) {
+    meta[0].originalName = req.file.originalname;
+  }
+  const { pem } = wrap(meta);
+  await fs.writeFile('key/My_Key.pem', pem);
+  res.download('key/My_Key.pem');
+});
+
+app.post('/download_data', upload.single('file'), async (req, res) => {
+  const metaArr = unwrap(await fs.readFile(req.file.path));
+  const chunks = metaArr.length;
+
+  await fs.mkdir('restored', { recursive: true });
+
+  for (let i = 0; i < chunks; i++) {
+    const cipher = await fs.readFile(`encrypted/SECRET${String(i).padStart(7, '0')}`);
+    const plain = decryptChunk(metaArr[i], cipher);
+    await fs.writeFile(`restored/SECRET${String(i).padStart(7, '0')}`, plain);
+  }
+  const outputName = metaArr[0].originalName || 'output.bin';
+  const output = path.join('restored', outputName);
+  await merge(chunks, output);
+  res.download(output, outputName);
+});
+
+app.listen(8000, () => console.log('Secure‑Store listening on :8000'));
