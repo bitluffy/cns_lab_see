@@ -60,6 +60,11 @@
       <div id="d2dReceiveResult" class="result"></div>
       <div id="d2dReceiveError" class="error"></div>
     </div>
+    <div class="section">
+      <h2>Received Files</h2>
+      <button id="refreshReceivedBtn">Refresh</button>
+      <ul id="receivedFilesList"></ul>
+    </div>
   </div>
   <script>
     // Encrypt & Split
@@ -145,6 +150,34 @@
         document.getElementById('d2dReceiveError').textContent = err.message;
       }
     };
+
+    async function loadReceivedFiles() {
+      const list = document.getElementById('receivedFilesList');
+      list.innerHTML = '<li>Loading...</li>';
+      try {
+        const res = await fetch('/received_files');
+        if (!res.ok) throw new Error('Failed to fetch received files');
+        const files = await res.json();
+        if (files.length === 0) {
+          list.innerHTML = '<li>No files received yet.</li>';
+        } else {
+          list.innerHTML = '';
+          files.forEach(f => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = `/download_received?file=${encodeURIComponent(f)}`;
+            a.textContent = f;
+            a.download = f;
+            li.appendChild(a);
+            list.appendChild(li);
+          });
+        }
+      } catch (err) {
+        list.innerHTML = `<li style='color:red'>${err.message}</li>`;
+      }
+    }
+    document.getElementById('refreshReceivedBtn').onclick = loadReceivedFiles;
+    window.addEventListener('DOMContentLoaded', loadReceivedFiles);
   </script>
 </body>
 </html> 

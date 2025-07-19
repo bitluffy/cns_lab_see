@@ -7,6 +7,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { send, receive } from './utils/network.js';
+import fsSync from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -88,10 +89,27 @@ app.post('/download_data', upload.single('file'), async (req, res) => {
     const plain = decryptChunk(metaArr[i], cipher);
     await fs.writeFile(`restored/SECRET${String(i).padStart(7, '0')}`, plain);
   }
-  const outputName = metaArr[0].originalName || 'output.bin';
+  const outputName = (metaArr[0].originalName || 'output.bin') + '.network';
   const output = path.join('restored', outputName);
   await merge(chunks, output);
   res.download(output, outputName);
+});
+
+app.get('/received_files', async (req, res) => {
+  try {
+    const files = (await fs.readdir('restored')).filter(f => f.endsWith('.network'));
+    res.json(files);
+  } catch (err) {
+    res.json([]);
+  }
+});
+
+app.get('/download_received', async (req, res) => {
+  const { file } = req.query;
+  if (!file || file.includes('..') || file.includes('/') || !file.endsWith('.network')) return res.status(400).send('Invalid file');
+  const filePath = path.join('restored', file);
+  if (!fsSync.existsSync(filePath)) return res.status(404).send('File not found');
+  res.download(filePath);
 });
 
 app.listen(8000, () => console.log('Secure‑Store listening on :8000'));

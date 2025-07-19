@@ -1,0 +1,7 @@
+encrypted/
+files/
+key/
+restored/
+uploads/
+package-lock.json 
+package.json 

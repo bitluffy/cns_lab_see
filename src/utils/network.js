@@ -7,18 +7,32 @@ export async function send(fileDir, bundlePath, host, port = 4000) {
   const bundle = await fs.readFile(bundlePath);
   const sock = createConnection({ host, port });
 
-  sock.write(Buffer.alloc(8, bundle.length.toString(16).padStart(16, '0'), 'hex'));
-  sock.write(bundle);
+  let socketOpen = true;
+  sock.on('error', (err) => {
+    socketOpen = false;
+    console.error('Socket error:', err.message);
+  });
+  sock.on('close', () => {
+    socketOpen = false;
+  });
 
-  for (const f of files) {
-    const stat = await fs.stat(`${fileDir}/${f}`);
-    sock.write(Buffer.alloc(8, stat.size.toString(16).padStart(16, '0'), 'hex'));
-    await pipeline(
-      await fs.open(`${fileDir}/${f}`, 'r').then(fd => fd.createReadStream()),
-      sock
-    );
+  try {
+    sock.write(Buffer.alloc(8, bundle.length.toString(16).padStart(16, '0'), 'hex'));
+    sock.write(bundle);
+
+    for (const f of files) {
+      if (!socketOpen) break;
+      const stat = await fs.stat(`${fileDir}/${f}`);
+      sock.write(Buffer.alloc(8, stat.size.toString(16).padStart(16, '0'), 'hex'));
+      await pipeline(
+        await fs.open(`${fileDir}/${f}`, 'r').then(fd => fd.createReadStream()),
+        sock
+      );
+    }
+    if (socketOpen) sock.end();
+  } catch (err) {
+    console.error('Send error:', err.message);
   }
-  sock.end();
 }
 
 export function receive(saveDir, bundleDest, port = 4000) {
