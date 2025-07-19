@@ -39,22 +39,18 @@ export function receive(saveDir, bundleDest, port = 4000) {
   const server = createServer(sock => {
     console.log(`[RECEIVER] Connection received from`, sock.remoteAddress, ':', sock.remotePort);
     let expecting = 'bundle', left = 0, meta = [];
-    const bufQ = [];
+    let buf = Buffer.alloc(0);
     sock.on('data', async data => {
-      console.log(`[RECEIVER] Data received:`, data.length, 'bytes');
-      bufQ.push(data);
-      while (bufQ.length) {
+      buf = Buffer.concat([buf, data]);
+      while (true) {
         if (left === 0) {
-          left = parseInt(bufQ.shift().toString('hex'), 16);
+          if (buf.length < 8) break; // Wait for 8 bytes for the length
+          left = parseInt(buf.subarray(0, 8).toString('hex'), 16);
           console.log(`[RECEIVER] Expecting next chunk of size`, left);
-          continue;
+          buf = buf.subarray(8);
         }
-        const chunk = bufQ.shift();
-        if (chunk.length < left) {
-          // wait for more
-          bufQ.unshift(chunk); break;
-        }
-        const piece = chunk.subarray(0, left);
+        if (buf.length < left) break; // Wait for enough data
+        const piece = buf.subarray(0, left);
         if (expecting === 'bundle') {
           await fs.writeFile(bundleDest, piece);
           console.log(`[RECEIVER] Bundle written to`, bundleDest);
@@ -66,9 +62,8 @@ export function receive(saveDir, bundleDest, port = 4000) {
           console.log(`[RECEIVER] File part written to`, filePath);
           meta.push(true);
         }
+        buf = buf.subarray(left);
         left = 0;
-        // push remainder back in queue
-        if (chunk.length > piece.length) bufQ.unshift(chunk.subarray(piece.length));
       }
     });
     sock.on('end', () => {
