@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Secure Store - Device-to-Device Transfer</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
+    .container { max-width: 500px; margin: 40px auto; background: #fff; padding: 2em 2.5em; border-radius: 10px; box-shadow: 0 2px 8px #0001; }
+    h1 { text-align: center; }
+    form { margin-bottom: 2em; }
+    label { display: block; margin-bottom: 0.5em; font-weight: bold; }
+    input[type="file"] { margin-bottom: 1em; }
+    button { background: #007bff; color: #fff; border: none; padding: 0.7em 1.5em; border-radius: 5px; cursor: pointer; font-size: 1em; }
+    button:hover { background: #0056b3; }
+    .result { margin-top: 1em; color: green; }
+    .error { margin-top: 1em; color: red; }
+    .section { margin-bottom: 2em; }
+    .navbar { background: #222; color: #fff; padding: 1em 0; margin-bottom: 2em; }
+    .navbar ul { list-style: none; display: flex; justify-content: center; margin: 0; padding: 0; }
+    .navbar li { margin: 0 1.5em; }
+    .navbar a { color: #fff; text-decoration: none; font-weight: bold; font-size: 1.1em; }
+    .navbar a.active, .navbar a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <ul>
+      <li><a href="/">Encryption/Decryption</a></li>
+      <li><a href="/network.html" class="active">Device-to-Device Transfer</a></li>
+    </ul>
+  </nav>
+  <div class="container">
+    <h1>Device-to-Device Transfer</h1>
+    <div class="section">
+      <h2>Send File to Another Device</h2>
+      <form id="d2dSendForm" enctype="multipart/form-data">
+        <label for="d2dIp">Target Device IP:</label>
+        <input type="text" id="d2dIp" name="ip" placeholder="e.g. 192.168.1.42" required />
+        <label for="d2dPort">Port:</label>
+        <input type="number" id="d2dPort" name="port" value="4000" required />
+        <label for="d2dFile">Select file to send:</label>
+        <input type="file" id="d2dFile" name="file" required />
+        <button type="submit">Send to Device</button>
+      </form>
+      <div id="d2dSendResult" class="result"></div>
+      <div id="d2dSendError" class="error"></div>
+    </div>
+    <div class="section">
+      <h2>Receive Files</h2>
+      <button id="d2dReceiveBtn">Start Receiving</button>
+      <div id="d2dReceiveResult" class="result"></div>
+      <div id="d2dReceiveError" class="error"></div>
+    </div>
+  </div>
+  <script>
+    // Device-to-Device Send
+    document.getElementById('d2dSendForm').onsubmit = async function(e) {
+      e.preventDefault();
+      const ip = document.getElementById('d2dIp').value;
+      const port = document.getElementById('d2dPort').value;
+      const fileInput = document.getElementById('d2dFile');
+      const data = new FormData();
+      data.append('file', fileInput.files[0]);
+      data.append('ip', ip);
+      data.append('port', port);
+      document.getElementById('d2dSendResult').textContent = '';
+      document.getElementById('d2dSendError').textContent = '';
+      try {
+        const res = await fetch('/d2d_send', { method: 'POST', body: data });
+        if (!res.ok) throw new Error('Failed to send file');
+        document.getElementById('d2dSendResult').textContent = 'File sent to device!';
+      } catch (err) {
+        document.getElementById('d2dSendError').textContent = err.message;
+      }
+    };
+    // Device-to-Device Receive
+    document.getElementById('d2dReceiveBtn').onclick = async function() {
+      document.getElementById('d2dReceiveResult').textContent = '';
+      document.getElementById('d2dReceiveError').textContent = '';
+      try {
+        const res = await fetch('/d2d_receive', { method: 'POST' });
+        if (!res.ok) throw new Error('Failed to start receiver');
+        document.getElementById('d2dReceiveResult').textContent = 'Receiver started! Waiting for files...';
+      } catch (err) {
+        document.getElementById('d2dReceiveError').textContent = err.message;
+      }
+    };
+  </script>
+  <script>
+    // WebSocket for real-time received file notifications (auto-download)
+    (function() {
+      let ws;
+      function connectWS() {
+        ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+        ws.onmessage = function(event) {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'received' && msg.file) {
+              // Auto-download the received file
+              const a = document.createElement('a');
+              a.href = `/download_received?file=${encodeURIComponent(msg.file)}`;
+              a.download = msg.file;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+            }
+          } catch (e) {}
+        };
+        ws.onclose = function() {
+          setTimeout(connectWS, 2000); // Reconnect on disconnect
+        };
+      }
+      connectWS();
+    })();
+  </script>
+</body>
+</html> 

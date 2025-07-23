@@ -13,7 +13,20 @@ import net from 'net';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const upload = multer({ dest: 'uploads/' });
+const uploadDir = path.resolve(__dirname, 'uploads');
+const restoredDir = path.resolve(__dirname, 'restored');
+const encryptedDir = path.resolve(__dirname, 'encrypted');
+const keyDir = path.resolve(__dirname, 'key');
+
+// Ensure required directories exist at startup
+(async () => {
+  await fs.mkdir(uploadDir, { recursive: true });
+  await fs.mkdir(restoredDir, { recursive: true });
+  await fs.mkdir(encryptedDir, { recursive: true });
+  await fs.mkdir(keyDir, { recursive: true });
+})();
+
+const upload = multer({ dest: uploadDir });
 
 // Serve static frontend
 const publicDir = path.resolve(__dirname, '../public');
@@ -83,7 +96,8 @@ app.post('/d2d_receive', async (req, res) => {
           fileBuf = buf.subarray(0, Number(fileLen));
           buf = buf.subarray(Number(fileLen));
           // Save file as binary
-          const savePath = path.join('restored', filename);
+          const savePath = path.join(restoredDir, filename);
+          await fs.mkdir(path.dirname(savePath), { recursive: true });
           await fs.writeFile(savePath, fileBuf);
           wsClients.forEach(ws => {
             if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'received', file: filename }));
@@ -142,7 +156,7 @@ app.post('/download_data', upload.single('file'), async (req, res) => {
     const plain = decryptChunk(metaArr[i], cipher);
     await fs.writeFile(`restored/SECRET${String(i).padStart(7, '0')}`, plain);
   }
-  const outputName = (metaArr[0].originalName || 'output.bin') + '.network';
+  const outputName = metaArr[0].originalName || 'output.bin';
   const output = path.join('restored', outputName);
   await merge(chunks, output);
   // Notify all WebSocket clients
@@ -154,7 +168,7 @@ app.post('/download_data', upload.single('file'), async (req, res) => {
 
 app.get('/received_files', async (req, res) => {
   try {
-    const files = (await fs.readdir('restored')).filter(f => f.endsWith('.network'));
+    const files = await fs.readdir(restoredDir);
     res.json(files);
   } catch (err) {
     res.json([]);
@@ -164,7 +178,7 @@ app.get('/received_files', async (req, res) => {
 app.get('/download_received', async (req, res) => {
   const { file } = req.query;
   if (!file || file.includes('..') || file.includes('/')) return res.status(400).send('Invalid file');
-  const filePath = path.join('restored', file);
+  const filePath = path.join(restoredDir, file);
   if (!fsSync.existsSync(filePath)) return res.status(404).send('File not found');
   res.download(filePath);
 });
